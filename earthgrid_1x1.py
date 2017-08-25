@@ -30,3 +30,19 @@ class Earth(object):
         area = self.R**2*(lon2-lon1)*(np.sin(lat2)-np.sin(lat1))
 
         return area
+    
+    def earthmask(self,lolat,hilat,lolon,hilon):
+        '''Defines a mask that can be applied to a 2D spherical Earth 1x1 dataset to isolate specific areas.'''
+
+        lat = np.arange(-89.5,90.5,1.0)
+        lon = np.arange(0.5,360.5,1.0)
+        Lon,Lat = np.meshgrid(lon,lat)
+        Latlow = Lat > lolat
+        Lathigh = Lat < hilat
+        goodLat = Latlow*Lathigh
+        Lonlow = Lon > lolon
+        Lonhigh = Lon < hilon
+        goodLon = Lonlow*Lonhigh
+        meshmask = goodLat*goodLon
+
+        return Lon[meshmask],Lat[meshmask]
