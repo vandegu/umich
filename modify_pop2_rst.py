@@ -130,7 +130,9 @@ class initialize_new_paleobath(GeographicSystem):
     def find_new_cells(self,):
 
         # Define a list of new cells to be filled for the new rst file.
+        # Also define a list that will gather data for the interpolation scheme, if necessary.
         new = []
+        interp_info = []
 
         print('\n\nFinding new seafloor...')
 
@@ -141,12 +143,21 @@ class initialize_new_paleobath(GeographicSystem):
                     # Check to see if cursor is below old seafloor and above new seafloor...
                     if k > self.oldkmt[j,i] and k < self.ns[j,i]:
 
-                    # ...and if it is, append the location to the 'new cell' arras as [depth,lon,lat] indices.
+                    # ...and if it is, append the location to the 'new cell' array as [depth,lon,lat] indices.
                         new.append([k,j,i])
 
+                    # ...and if it is above old seafloor, create an organized array of d,lon,lat,value for
+                    # use in the interpolation methods of this code.
+                    elif k <= self.oldkmt[j,i]:
+                            if self.im == 'nn':
+
+                                interp_info.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i],k,j,i])
+
         # Convert new list into an array...size [x,3], where x is the number of cells to be filled,
-        # and the other dimension is 0=k, 1=j, and 2=i.
+        # and the other dimension is 0=k, 1=j, and 2=i. Also convert interp_info into an array.
         new = np.array(new)
+        if self.im == 'nn':
+            self.interp_info = np.array(interp_info)
 
         return new
 
@@ -164,7 +175,7 @@ class initialize_new_paleobath(GeographicSystem):
             # EDIT HERE: THIS SHOULD ONLY PRODUCE XYZ_GRID OF ALREADY DEFINED POINTS!
             # Convert lat, lon, depth grid to x, y, z on data grid:
             print('\n\nConverting from LLA to XYZ coordinate system...')
-            self.xyz_grid = self.geodetic2geocentric(self.tlon,self.tlat,self.tdepth)
+            self.xyz_grid = self.geodetic2geocentric(self.interp_info[:,1],self.interp_info[:,2],self.interp_info[:,0])
 
         # Read in old restart file and make a global attribute to be referenced in the 'writeout' function.
         self.f0 = nc.Dataset(rstin)
@@ -208,10 +219,17 @@ class initialize_new_paleobath(GeographicSystem):
         # requires the lat, lon, and depth grids to convert.
         elif self.im == 'nn':
 
+            # Create data grid that corresponds to the xyz_grid (in other words, only the defined (above-seafloor)
+            # points that were in the olddata).
+            print('\n\nIdentifying data from which to interpolate from in the old restart file...')
+            defined_olddata = []
+            for x in range(len(self.interp_info[:,3])):
+                defined_olddata.append(olddata[self.interp_info[x,3],self.interp_info[x,4],self.interp_info[x,5]])
+            defined_olddata = np.array(defined_olddata)
+
             # Create interpolation class instance:
             print('\n\nCreating nearest-neighbor interpolation matrix...')
-            interpEngine = si.NearestNDInterpolator(self.xyz_grid,olddata.flatten()) # EDIT HERE: THE OLDDATA NEEDS TO BE ONLY THE DATA THAT IS NOT 0
-            #interp = tt.__call__(grid)
+            interpEngine = si.NearestNDInterpolator(self.xyz_grid,defined_olddata) # EDIT HERE: THE OLDDATA NEEDS TO BE ONLY THE DATA THAT IS NOT 0
 
             for cell in self.new:
 
@@ -219,6 +237,13 @@ class initialize_new_paleobath(GeographicSystem):
                 newdata[cell[0],cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
 
             return newdata
+
+        # Nearest Horizontal Neighbor
+        elif self.im == 'nhn':
+
+            pass
+
+
 
         # other interpolation methods will be built-in later...
 
@@ -231,13 +256,11 @@ class initialize_new_paleobath(GeographicSystem):
 
         if llon.size > 1:
 
-            xyz = []
-            for d in ddepth: # EDIT HERE: LIMIT THE DEPTH TO SELF>OLDKMT VALUE SOMEHOW?
-                for lon,lat in zip(llon.flatten(),llat.flatten()):
-                    x,y,z = g.toECEF(lon,lat,d)
-                    xyz.append([x,y,z])
+            x,y,z = g.toECEF(llon,llat,ddepth)
+            xyz = [x,y,z]
 
-            return np.array(xyz)
+            # Convert to [x,3] array with [x,y,z] in the second dimension.
+            return np.array(xyz).T
 
         else:
 
