@@ -369,10 +369,10 @@ if __name__=='__main__':
     print(kmt.shape)
 
     # Technically not even needed...the code calculates the old kmt from the restart file temperature grid...
-    f = open('kmt.m.150519.ieeei4','r')
-    kmtc = np.fromfile(f,dtype='>i4',count=-1,sep='') # Big-endian (most significant byte first) 32-bit (4-byte) integers.
-    kmtc = kmtc.reshape((384,320))
-    print(kmtc.shape)
+    #f = open('kmt.m.150519.ieeei4','r')
+    #kmtc = np.fromfile(f,dtype='>i4',count=-1,sep='') # Big-endian (most significant byte first) 32-bit (4-byte) integers.
+    #kmtc = kmtc.reshape((384,320))
+    #print(kmtc.shape)
 
     f = nc.Dataset('../../data/pop2_clim/MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.h.851-850.nc')
     tlat = f.variables['TLAT'][:]
