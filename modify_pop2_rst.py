@@ -232,8 +232,8 @@ class initialize_new_paleobath(GeographicSystem):
         if llon.size > 1:
 
             xyz = []
-            for lon,lat in zip(llon.flatten(),llat.flatten()):
-                for d in ddepth: # EDIT HERE: LIMIT THE DEPTH TO SELF>OLDKMT VALUE SOMEHOW?
+            for d in ddepth: # EDIT HERE: LIMIT THE DEPTH TO SELF>OLDKMT VALUE SOMEHOW?
+                for lon,lat in zip(llon.flatten(),llat.flatten()):
                     x,y,z = g.toECEF(lon,lat,d)
                     xyz.append([x,y,z])
 
