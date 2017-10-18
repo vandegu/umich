@@ -38,7 +38,8 @@ print(kmtc.shape)
 
 
 
-
+# The CoordinateSystem and GeographicSystem classes are hereby used courtesy of Dr. Eric Bruning; his
+# repository of excellent cartography tools (among other things) can be found at https://github.com/deeplycloudy.
 
 class CoordinateSystem(object):
     """The abstract coordinate system handling provided here works as follows.
