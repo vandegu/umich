@@ -6,40 +6,18 @@ import os
 import pyproj as proj4
 import scipy.interpolate as si
 
-# Load test dataset and a test variable for the class to operate upon.
-filename0 = '../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0847-01-01-00000.nc'
-f0 = nc.Dataset(filename0)
-t = f0.variables['TEMP_CUR'][:]
-print(t.shape)
-
-#print(f0.variables)
-
-filename1 = 'kmt.deeptethys1.nc' # So there's something wrong with the nc files...they don't go through the same
-# hard-coded things as the ieeei4 files do in nan's code.
-f1 = nc.Dataset(filename1)
-kmtnc = f1.variables['kmt'][:]
-print(kmtnc.shape)
-
-filename1 = 'kmt.deeppanama1.ieeei4' #
-f1 = open(filename1,'r')
-kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
-kmt = kmt.reshape((384,320))
-print(kmt.shape)
-
-filename2 = '../MAA_tarea.nc'
-f2 = nc.Dataset(filename2)
-tar = f2.variables['TAREA'][:]
-print(tar.shape)
-
-f = open('kmt.m.150519.ieeei4','r')
-kmtc = np.fromfile(f,dtype='>i4',count=-1,sep='') # Big-endian (most significant byte first) 32-bit (4-byte) integers.
-kmtc = kmtc.reshape((384,320))
-print(kmtc.shape)
-
-
-
 # The CoordinateSystem and GeographicSystem classes are hereby used courtesy of Dr. Eric Bruning; his
 # repository of excellent cartography tools (among other things) can be found at https://github.com/deeplycloudy.
+
+# Other notes: This code could be more elegant, and because it involves several loops through data, can be
+# somewhat slow. The 'nhn' interpolation method is the slowest (~35 minutes), the 'nn' method follows, and the
+# 'nvn' method is the quickest. A global averaging method may be very fast in the future when it is implemented.
+# Finally, this code could be rewritten to calculate exactly which locations within the grids need to be modified
+# and from where for each nearest neighbor interpolation scheme, and then that matrix could be passed to all of
+# the necessary components of the code to speed it up. However, this improvement will have to wait, as I am too
+# busy to implement it now.
+
+# Published Oct. 18, 2017 - Andrew Vande Guchte
 
 class CoordinateSystem(object):
     """The abstract coordinate system handling provided here works as follows.
@@ -107,7 +85,7 @@ class GeographicSystem(CoordinateSystem):
 
 class initialize_new_paleobath(GeographicSystem):
 
-    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,interp_method='nn'):
+    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,interp_method='nhn'):
         '''The first argument is the variable from the restart file.
            The second argument is the shape of the new paleobath.
            The third argument
@@ -123,9 +101,6 @@ class initialize_new_paleobath(GeographicSystem):
         self.oldkmt = self.getNearestPointAbove() # 2D kmt from oldvariable. Assumes no overhang.
                                                   # NOTE: This is kmt-1, so that it is a pythonic index.
         self.new = self.find_new_cells()
-
-
-
 
     def find_new_cells(self,):
 
@@ -149,14 +124,14 @@ class initialize_new_paleobath(GeographicSystem):
                     # ...and if it is above old seafloor, create an organized array of d,lon,lat,value for
                     # use in the interpolation methods of this code.
                     elif k <= self.oldkmt[j,i]:
-                            if self.im == 'nn':
+                            if self.im == 'nn' or self.im == 'nhn':
 
                                 interp_info.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i],k,j,i])
 
         # Convert new list into an array...size [x,3], where x is the number of cells to be filled,
         # and the other dimension is 0=k, 1=j, and 2=i. Also convert interp_info into an array.
         new = np.array(new)
-        if self.im == 'nn':
+        if self.im == 'nn' or self.im == 'nhn':
             self.interp_info = np.array(interp_info)
 
         return new
@@ -172,7 +147,6 @@ class initialize_new_paleobath(GeographicSystem):
 
         if self.im == 'nn': # Nearest-Neighbor (nn)
 
-            # EDIT HERE: THIS SHOULD ONLY PRODUCE XYZ_GRID OF ALREADY DEFINED POINTS!
             # Convert lat, lon, depth grid to x, y, z on data grid:
             print('\n\nConverting from LLA to XYZ coordinate system...')
             self.xyz_grid = self.geodetic2geocentric(self.interp_info[:,1],self.interp_info[:,2],self.interp_info[:,0])
@@ -184,7 +158,7 @@ class initialize_new_paleobath(GeographicSystem):
         # Initialize new data dictionary to be written to the output netcdf file.
         newrst = dict()
 
-        for var in keys[-4:-3]:
+        for var in keys:#[-4:-3]: # Commented part is for testing.
 
             print(var)
             olddata = f0.variables['%s'%var][:]
@@ -195,7 +169,7 @@ class initialize_new_paleobath(GeographicSystem):
 
                 newdata = self.fill_new_cells(newdata,olddata)
 
-                print(newdata[:,218,166]) # THIS LINE IS FOR TESTING THE VIABILITY OF FILLING.
+                #print(newdata[:,218,166]) # THIS LINE IS FOR TESTING THE VIABILITY OF FILLING.
 
             # Save the new data to the dictionary containing all the data to be written out as the new rst file:
             newrst[var] = newdata
@@ -229,7 +203,7 @@ class initialize_new_paleobath(GeographicSystem):
 
             # Create interpolation class instance:
             print('\n\nCreating nearest-neighbor interpolation matrix...')
-            interpEngine = si.NearestNDInterpolator(self.xyz_grid,defined_olddata) # EDIT HERE: THE OLDDATA NEEDS TO BE ONLY THE DATA THAT IS NOT 0
+            interpEngine = si.NearestNDInterpolator(self.xyz_grid,defined_olddata)
 
             for cell in self.new:
 
@@ -241,9 +215,51 @@ class initialize_new_paleobath(GeographicSystem):
         # Nearest Horizontal Neighbor
         elif self.im == 'nhn':
 
-            pass
+            # Defined data and their locations (defined_olddata,xyz_grid) will be dictionaries, where the key is the
+            # klvl (depth level). In other words, each level of data will be interpolated seperately, and based off of what
+            # depth level they are at.
+            xyz_grid = dict()
+            defined_olddata = dict()
 
+            print('\n\nFinding data and converting from LLA to XYZ coordinate systems on grid level: ')
 
+            for klvl in range(self.ov.shape[0]):
+
+                print('k = %d'%klvl)
+
+                # Initialize the lists that will capture the data on each level.
+                gridlla_at_this_level = []
+                values_at_this_level = []
+
+                for k,j,i in self.interp_info[:,3:6]:
+
+                    if k == klvl:
+
+                        # Append any data and locations in LLA that are on this level and are defined in the old rst file.
+                        gridlla_at_this_level.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i]])
+                        values_at_this_level.append(olddata[k,j,i])
+
+                gridlla_at_this_level = np.array(gridlla_at_this_level)
+
+                xyz_grid[klvl] = self.geodetic2geocentric(gridlla_at_this_level[:,1],gridlla_at_this_level[:,2],gridlla_at_this_level[:,0])
+                defined_olddata[klvl] = np.array(values_at_this_level)
+
+            print('\n\nBuilding interpolation matrix and interpolating to new grid cells on grid level: ')
+
+            for klvl in range(self.ov.shape[0]):
+
+                print('k = %d'%klvl)
+
+                interpEngine = si.NearestNDInterpolator(xyz_grid[klvl],defined_olddata[klvl])
+
+                for cell in self.new:
+
+                    if cell[0] == klvl:
+
+                        xyz_cell = self.geodetic2geocentric(self.tlon[cell[1],cell[2]],self.tlat[cell[1],cell[2]],self.tdepth[cell[0]])
+                        newdata[cell[0],cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
+
+        return newdata
 
         # other interpolation methods will be built-in later...
 
@@ -270,6 +286,8 @@ class initialize_new_paleobath(GeographicSystem):
 
 
     def global_avg(self,tarea):
+        '''Not implemented at this time; in the future this will likely be the global averege for each level'''
+
         pass
 
     def getNearestPointAbove(self,):
@@ -336,11 +354,29 @@ class initialize_new_paleobath(GeographicSystem):
 
         print('\n\nFinished! New restart file: %s \n\n'%outfilename)
 
+if __name__=='__main__':
 
+    # Load test dataset and a test variable for the class to operate upon.
+    filename0 = '../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0847-01-01-00000.nc'
+    f0 = nc.Dataset(filename0)
+    t = f0.variables['TEMP_CUR'][:]
+    print(t.shape)
 
-f = nc.Dataset('../../data/pop2_clim/MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.h.851-850.nc')
-tlat = f.variables['TLAT'][:]
-tlon = f.variables['TLONG'][:]
-depth = f.variables['z_t'][:]/100.0*-1
-zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth)
-zzz.create_new_rst('../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0851-01-01-00000.nc','../testout_rst.nc')
+    filename1 = 'kmt.deeppanama1.ieeei4' #
+    f1 = open(filename1,'r')
+    kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
+    kmt = kmt.reshape((384,320))
+    print(kmt.shape)
+
+    # Technically not even needed...the code calculates the old kmt from the restart file temperature grid...
+    f = open('kmt.m.150519.ieeei4','r')
+    kmtc = np.fromfile(f,dtype='>i4',count=-1,sep='') # Big-endian (most significant byte first) 32-bit (4-byte) integers.
+    kmtc = kmtc.reshape((384,320))
+    print(kmtc.shape)
+
+    f = nc.Dataset('../../data/pop2_clim/MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.h.851-850.nc')
+    tlat = f.variables['TLAT'][:]
+    tlon = f.variables['TLONG'][:]
+    depth = f.variables['z_t'][:]/100.0*-1
+    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth)
+    zzz.create_new_rst('../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0851-01-01-00000.nc','../testout_rst.nc')
