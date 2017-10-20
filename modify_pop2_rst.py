@@ -9,7 +9,7 @@ import scipy.interpolate as si
 # The CoordinateSystem and GeographicSystem classes are hereby used courtesy of Dr. Eric Bruning; his
 # repository of excellent cartography tools (among other things) can be found at https://github.com/deeplycloudy.
 
-# Other notes: This code could be more elegant, and because it involves several loops through data, can be
+# Developer notes: This code could be more elegant, and because it involves several loops through data, can be
 # somewhat slow. The 'nhn' interpolation method is the slowest (~35 minutes), the 'nn' method follows, and the
 # 'nvn' method is the quickest. A global averaging method may be very fast in the future when it is implemented.
 # Finally, this code could be rewritten to calculate exactly which locations within the grids need to be modified
@@ -17,7 +17,24 @@ import scipy.interpolate as si
 # the necessary components of the code to speed it up. However, this improvement will have to wait, as I am too
 # busy to implement it now.
 
-# Published Oct. 18, 2017 - Andrew Vande Guchte
+# Last few IMPORTANT notes about running this script:
+#
+# 1) To change the input, output, and other model variables go to the very bottom of the script, under the
+#    'if name = main' conditional. These should be the only thing you need to change, unless you wish to 
+#    use a different interpolation scheme, which is determined when the initialize_new_paleobath instance 
+#    is created with the interp_method argument.
+#
+# 2) This script assumes that there are no 'overhanging' ledges in the bathymetry (i.e. land cells above 
+#    water cells). If there are--and I'm not even sure that would be allowed in CESM--this code will break
+#    in all kinds of places. You should probably fix those overhangs.
+#
+# 3) So far, this script has been built to interpolate the restart data to NEW OCEAN CELLS, and is not 
+#    equipped to remove ocean cells (turning them to land cells). This addition will likely come soon, it
+#    was simply not necessary so far in this research project. It may not even be necessary, so long as 
+#    KMT file of the new paleobathymetry is accurate. Not sure exactly how CESM would handle that.
+#
+
+# Published Oct. 20, 2017 - Andrew Vande Guchte
 
 class CoordinateSystem(object):
     """The abstract coordinate system handling provided here works as follows.
@@ -92,9 +109,9 @@ class initialize_new_paleobath(GeographicSystem):
            The third argument is the interpolation method:
            '''
 
-        self.tlat = tlat
-        self.tlon = tlon
-        self.tdepth = tdepth
+        self.tlat = tlat # Please make sure this is the T-grid, where scalar variables are defined.
+        self.tlon = tlon # See above.
+        self.tdepth = tdepth # See above.
         self.im = interp_method
         self.ns = newkmt # 2D new shape (new kmt data), not pythonic (ie unlike self.oldkmt).
         self.ov = oldtemp # 3D variable data from restart file (preferably temperature).
@@ -103,6 +120,9 @@ class initialize_new_paleobath(GeographicSystem):
         self.new = self.find_new_cells()
 
     def find_new_cells(self,):
+        '''This function identifies which new ocean cells are being introduced with the new 
+           kmt. It does not at this time identify where the ocean is being removed in favor
+           of land.'''
 
         # Define a list of new cells to be filled for the new rst file.
         # Also define a list that will gather data for the interpolation scheme, if necessary.
@@ -120,6 +140,11 @@ class initialize_new_paleobath(GeographicSystem):
 
                     # ...and if it is, append the location to the 'new cell' array as [depth,lon,lat] indices.
                         new.append([k,j,i])
+                    
+                    # ...and if it is above old seafloor but below the new one (i.e. user added land cells)...
+                    #elif k <= self.oldkmt[j,i] and k > self.ns[j,i]:
+                    #    
+                    #    pass # will be implemented when necessary
 
                     # ...and if it is above old seafloor, create an organized array of d,lon,lat,value for
                     # use in the interpolation methods of this code.
