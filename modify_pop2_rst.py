@@ -165,7 +165,9 @@ class initialize_new_paleobath(GeographicSystem):
         '''Fill the empty cells in self.new with the determined values which can be created via any of
            the following methods:
 
-           Nearest vertical neighbor
+           Nearest vertical neighbor (nvn)
+           Nearest horizontal neighbor (nhn)
+           Nearest neighbor (nn)
 
            Reads in rstin, writes out to rstout
            '''
