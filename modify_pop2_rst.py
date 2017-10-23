@@ -389,7 +389,8 @@ if __name__=='__main__':
     t = f0.variables['TEMP_CUR'][:]
     print(t.shape)
 
-    filename1 = 'kmt.deeppanama1.ieeei4' #
+    # Read in the kmt binary file that pop2 points to in its namelist.
+    filename1 = 'kmt.deeppanama1.ieeei4' 
     f1 = open(filename1,'r')
     kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
     kmt = kmt.reshape((384,320))
@@ -401,6 +402,7 @@ if __name__=='__main__':
     #kmtc = kmtc.reshape((384,320))
     #print(kmtc.shape)
 
+    # Read in a history file from pop2 (ideally from the same time as the restart file, but not strictly necessary).
     f = nc.Dataset('../../data/pop2_clim/MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.h.851-850.nc')
     tlat = f.variables['TLAT'][:]
     tlon = f.variables['TLONG'][:]
