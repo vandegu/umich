@@ -383,13 +383,13 @@ class initialize_new_paleobath(GeographicSystem):
 
 if __name__=='__main__':
 
-    # Load test dataset and a test variable for the class to operate upon.
+    # Load restart file to modify.
     filename0 = '../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0847-01-01-00000.nc'
     f0 = nc.Dataset(filename0)
     t = f0.variables['TEMP_CUR'][:]
     print(t.shape)
 
-    # Read in the kmt binary file that pop2 points to in its namelist.
+    # Read in the NEW kmt binary file...big-endian 32-bit integers.
     filename1 = 'kmt.deeppanama1.ieeei4' 
     f1 = open(filename1,'r')
     kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
