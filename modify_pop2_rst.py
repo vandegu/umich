@@ -20,25 +20,26 @@ import scipy.interpolate as si
 # Last few IMPORTANT notes about running this script:
 #
 # 1) To change the input, output, and other model variables go to the very bottom of the script, under the
-#    'if name = main' conditional. These should be the only thing you need to change, unless you wish to 
-#    use a different interpolation scheme, which is determined when the initialize_new_paleobath instance 
+#    'if name = main' conditional. These should be the only thing you need to change, unless you wish to
+#    use a different interpolation scheme, which is determined when the initialize_new_paleobath instance
 #    is created with the interp_method argument.
 #
-# 2) This script assumes that there are no 'overhanging' ledges in the bathymetry (i.e. land cells above 
+# 2) This script assumes that there are no 'overhanging' ledges in the bathymetry (i.e. land cells above
 #    water cells). If there are--and I'm not even sure that would be allowed in CESM--this code will break
 #    in all kinds of places. You should probably fix those overhangs.
 #
-# 3) So far, this script has been built to interpolate the restart data to NEW OCEAN CELLS, and is not 
+# 3) So far, this script has been built to interpolate the restart data to NEW OCEAN CELLS, and is not
 #    equipped to remove ocean cells (turning them to land cells). This addition will likely come soon, it
-#    was simply not necessary so far in this research project. It may not even be necessary, so long as 
+#    was simply not necessary so far in this research project. It may not even be necessary, so long as
 #    KMT file of the new paleobathymetry is accurate. Not sure exactly how CESM would handle that.
+#
+# 4) The nvn interpolation DOES NOT SUPPORT 2D GRID INTERPOLATION AT THIS TIME.
 #
 
 # Published Oct. 20, 2017 - Andrew Vande Guchte
 
 class CoordinateSystem(object):
     """The abstract coordinate system handling provided here works as follows.
-
     Each coordinate system must be able to convert data to a common coordinate system, which is chosen to be ECEF cartesian.
     data -> common system
     common system -> dislpay coordinates
@@ -46,17 +47,14 @@ class CoordinateSystem(object):
     User code is responsible for taking data in its native coord system,
         transforming it using to/fromECEF using the a coord system appropriate to the data, and then
         transforming that data to the final coordinate system using another coord system.
-
     This class maintains an attribute WGS84xyz that can be used in
         transformations to/from the WGS84 ECEF cartesian system, e.g.
         >>> WGS84lla = proj4.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
         >>> projectedData = proj4.transform(WGS84lla, coordinateSystem.WGS84xyz, lat, lon, alt )
     The ECEF system has its origin at the center of the earth, with the +Z toward the north pole,
         +X toward (lat=0, lon=0), and +Y right-handed orthogonal to +X, +Z
-
     Depends on pyproj, http://code.google.com/p/pyproj/ to handle the ugly details of
     various map projections, geodetic transforms, etc.
-
     "You can think of a coordinate system as being something like character encodings,
     but messier, and without an obvious winner like UTF-8." - Django OSCON tutorial, 2007
     http://toys.jacobian.org/presentations/2007/oscon/tutorial/
@@ -102,13 +100,15 @@ class GeographicSystem(CoordinateSystem):
 
 class initialize_new_paleobath(GeographicSystem):
 
-    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,interp_method='nhn'):
+    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,twodeeint,interp_method='nhn',):
         '''The first argument is the variable from the restart file.
            The second argument is the shape of the new paleobath.
            The third argument
            The third argument is the interpolation method:
            '''
 
+        self.tdi = twodeeint
+        self.emptyvalue = 0 # Fill value for land cells.
         self.tlat = tlat # Please make sure this is the T-grid, where scalar variables are defined.
         self.tlon = tlon # See above.
         self.tdepth = tdepth # See above.
@@ -120,7 +120,7 @@ class initialize_new_paleobath(GeographicSystem):
         self.new = self.find_new_cells()
 
     def find_new_cells(self,):
-        '''This function identifies which new ocean cells are being introduced with the new 
+        '''This function identifies which new ocean cells are being introduced with the new
            kmt. It does not at this time identify where the ocean is being removed in favor
            of land.'''
 
@@ -128,6 +128,8 @@ class initialize_new_paleobath(GeographicSystem):
         # Also define a list that will gather data for the interpolation scheme, if necessary.
         new = []
         interp_info = []
+        tdi_interp_info = []
+        obsolete = []
 
         print('\n\nFinding new seafloor...')
 
@@ -140,35 +142,48 @@ class initialize_new_paleobath(GeographicSystem):
 
                     # ...and if it is, append the location to the 'new cell' array as [depth,lon,lat] indices.
                         new.append([k,j,i])
-                    
+
                     # ...and if it is above old seafloor but below the new one (i.e. user added land cells)...
-                    #elif k <= self.oldkmt[j,i] and k > self.ns[j,i]:
-                    #    
-                    #    pass # will be implemented when necessary
+                    elif k <= self.oldkmt[j,i] and k > self.ns[j,i]:
+
+                        obsolete.append([k,j,i])
 
                     # ...and if it is above old seafloor, create an organized array of d,lon,lat,value for
                     # use in the interpolation methods of this code.
-                    elif k <= self.oldkmt[j,i]:
+                    if k <= self.oldkmt[j,i]:
                             if self.im == 'nn' or self.im == 'nhn':
 
                                 interp_info.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i],k,j,i])
 
+                                # Collect the locations of all of the valid ocean cells at sea level for 2D interp...
+                                if self.tdi == True:
+
+                                    if k == 0:
+
+                                        tdi_interp_info.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i],k,j,i])
+
         # Convert new list into an array...size [x,3], where x is the number of cells to be filled,
-        # and the other dimension is 0=k, 1=j, and 2=i. Also convert interp_info into an array.
+        # and the other dimension is 0=k, 1=j, and 2=i. Also convert interp_info into an array,as well as the
+        # 2D interpolation info.
+
         new = np.array(new)
+
+        # Arrays to determine what exists in old paleogeo but not in new...these cells will be set to 0.
+        obsolete = np.array(obsolete)
+        bad2d = self.ns == 0
+
         if self.im == 'nn' or self.im == 'nhn':
             self.interp_info = np.array(interp_info)
+            self.tdi_interp_info = np.array(tdi_interp_info)
 
         return new
 
-    def create_new_rst(self,rstin,rstout):
+    def create_new_rst(self,rstin,rstout,):
         '''Fill the empty cells in self.new with the determined values which can be created via any of
            the following methods:
-
            Nearest vertical neighbor (nvn)
            Nearest horizontal neighbor (nhn)
            Nearest neighbor (nn)
-
            Reads in rstin, writes out to rstout
            '''
 
@@ -177,6 +192,12 @@ class initialize_new_paleobath(GeographicSystem):
             # Convert lat, lon, depth grid to x, y, z on data grid:
             print('\n\nConverting from LLA to XYZ coordinate system...')
             self.xyz_grid = self.geodetic2geocentric(self.interp_info[:,1],self.interp_info[:,2],self.interp_info[:,0])
+
+        if self.tdi == True:
+
+            # Convert the locations of sea-surface (2D) variables (only sea-surface) to xyz...
+            print('\n\nConverting from LLA to XYZ coordinate system...for 2D variables...')
+            self.tdi_xyz_grid = self.geodetic2geocentric(self.tdi_interp_info[:,1],self.tdi_interp_info[:,2],tdi_self.interp_info[:,0])
 
         # Read in old restart file and make a global attribute to be referenced in the 'writeout' function.
         self.f0 = nc.Dataset(rstin)
@@ -197,6 +218,36 @@ class initialize_new_paleobath(GeographicSystem):
                 newdata = self.fill_new_cells(newdata,olddata)
 
                 #print(newdata[:,218,166]) # THIS LINE IS FOR TESTING THE VIABILITY OF FILLING.
+
+                # Edit new land points to be 0...
+                print('\n\n......removing data from new land locations......')
+                for badcell in obsolete:
+                    newdata[badcell[0],badcell[1],badcell[2]] = self.emptyvalue
+
+            # Test to see if a 2D variable, and check if 2D is wanted to be interpolated as well.
+            # 2D variable interpolation is only necessary if the paleogeography at sea-level and above is
+            # changed.
+            if len(olddata.shape) == 2:
+                if self.tdi == True:
+
+                    defined_olddata = []
+                    for x in range(len(self.tdi_interp_info[:,4])):
+                        defined_olddata.append(self.interp_info[x,4],self.interp_info[x,5]]) # Only j,i in 2D grids.
+                    defined_olddata = np.array(defined_olddata)
+
+                    # Create interpolation class instance for 2D variable:
+                    print('\n\nCreating nearest-neighbor interpolation matrix for %s...'%var)
+                    interpEngine = si.NearestNDInterpolator(self.tdi_xyz_grid,defined_olddata)
+
+                    # Identify the new surface cells.
+                    for cell in self.new:
+                        if cell[0] == 0:
+
+                            xyz_cell = self.geodetic2geocentric(self.tlon[cell[1],cell[2]],self.tlat[cell[1],cell[2]],self.tdepth[cell[0]])
+                            newdata[cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
+
+                    # Edit the new land points to be 0.
+                    newdata[bad2d] = self.emptyvalue
 
             # Save the new data to the dictionary containing all the data to be written out as the new rst file:
             newrst[var] = newdata
@@ -390,7 +441,7 @@ if __name__=='__main__':
     print(t.shape)
 
     # Read in the NEW kmt binary file...big-endian 32-bit integers.
-    filename1 = 'kmt.deeppanama1.ieeei4' 
+    filename1 = 'kmt.deeppanama1.ieeei4'
     f1 = open(filename1,'r')
     kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
     kmt = kmt.reshape((384,320))
@@ -407,5 +458,5 @@ if __name__=='__main__':
     tlat = f.variables['TLAT'][:]
     tlon = f.variables['TLONG'][:]
     depth = f.variables['z_t'][:]/100.0*-1
-    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth)
+    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth,twodeeint=True)
     zzz.create_new_rst('../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0851-01-01-00000.nc','../testout_rst.nc')
