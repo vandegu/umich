@@ -169,8 +169,8 @@ class initialize_new_paleobath(GeographicSystem):
         new = np.array(new)
 
         # Arrays to determine what exists in old paleogeo but not in new...these cells will be set to 0.
-        obsolete = np.array(obsolete)
-        bad2d = self.ns == 0
+        self.obsolete = np.array(obsolete)
+        self.bad2d = self.ns == 0
 
         if self.im == 'nn' or self.im == 'nhn':
             self.interp_info = np.array(interp_info)
@@ -197,7 +197,7 @@ class initialize_new_paleobath(GeographicSystem):
 
             # Convert the locations of sea-surface (2D) variables (only sea-surface) to xyz...
             print('\n\nConverting from LLA to XYZ coordinate system...for 2D variables...')
-            self.tdi_xyz_grid = self.geodetic2geocentric(self.tdi_interp_info[:,1],self.tdi_interp_info[:,2],tdi_self.interp_info[:,0])
+            self.tdi_xyz_grid = self.geodetic2geocentric(self.tdi_interp_info[:,1],self.tdi_interp_info[:,2],self.tdi_interp_info[:,0])
 
         # Read in old restart file and make a global attribute to be referenced in the 'writeout' function.
         self.f0 = nc.Dataset(rstin)
@@ -206,7 +206,7 @@ class initialize_new_paleobath(GeographicSystem):
         # Initialize new data dictionary to be written to the output netcdf file.
         newrst = dict()
 
-        for var in keys:#[-4:-3]: # Commented part is for testing.
+        for var in ['PSURF_CUR','TEMP_CUR']:#keys: # Commented part is for testing.
 
             print(var)
             olddata = f0.variables['%s'%var][:]
@@ -221,7 +221,7 @@ class initialize_new_paleobath(GeographicSystem):
 
                 # Edit new land points to be 0...
                 print('\n\n......removing data from new land locations......')
-                for badcell in obsolete:
+                for badcell in self.obsolete:
                     newdata[badcell[0],badcell[1],badcell[2]] = self.emptyvalue
 
             # Test to see if a 2D variable, and check if 2D is wanted to be interpolated as well.
@@ -232,11 +232,11 @@ class initialize_new_paleobath(GeographicSystem):
 
                     defined_olddata = []
                     for x in range(len(self.tdi_interp_info[:,4])):
-                        defined_olddata.append(self.interp_info[x,4],self.interp_info[x,5]]) # Only j,i in 2D grids.
+                        defined_olddata.append([self.interp_info[x,4],self.interp_info[x,5]]) # Only j,i in 2D grids.
                     defined_olddata = np.array(defined_olddata)
 
                     # Create interpolation class instance for 2D variable:
-                    print('\n\nCreating nearest-neighbor interpolation matrix for %s...'%var)
+                    print('...Creating nearest-neighbor interpolation matrix for %s...\n'%var)
                     interpEngine = si.NearestNDInterpolator(self.tdi_xyz_grid,defined_olddata)
 
                     # Identify the new surface cells.
@@ -247,7 +247,7 @@ class initialize_new_paleobath(GeographicSystem):
                             newdata[cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
 
                     # Edit the new land points to be 0.
-                    newdata[bad2d] = self.emptyvalue
+                    newdata[self.bad2d] = self.emptyvalue
 
             # Save the new data to the dictionary containing all the data to be written out as the new rst file:
             newrst[var] = newdata
@@ -441,7 +441,7 @@ if __name__=='__main__':
     print(t.shape)
 
     # Read in the NEW kmt binary file...big-endian 32-bit integers.
-    filename1 = 'kmt.deeppanama1.ieeei4'
+    filename1 = 'kmt.deeplab2.ieeei4'
     f1 = open(filename1,'r')
     kmt = np.fromfile(f1,dtype='>i4',count=-1,sep='')
     kmt = kmt.reshape((384,320))
