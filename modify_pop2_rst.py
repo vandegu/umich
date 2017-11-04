@@ -100,12 +100,14 @@ class GeographicSystem(CoordinateSystem):
 
 class initialize_new_paleobath(GeographicSystem):
 
-    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,twodeeint,interp_method='nhn',):
+    def __init__(self,oldtemp,newkmt,tlat,tlon,tdepth,twodeeint=True,interp_method='nhn',):
         '''The first argument is the variable from the restart file.
            The second argument is the shape of the new paleobath.
            The third argument
            The third argument is the interpolation method:
            '''
+
+        print('\n\nInterpolation method chosen:   %s'%interp_method)
 
         self.tdi = twodeeint
         self.emptyvalue = 0 # Fill value for land cells.
@@ -151,7 +153,7 @@ class initialize_new_paleobath(GeographicSystem):
                     # ...and if it is above old seafloor, create an organized array of d,lon,lat,value for
                     # use in the interpolation methods of this code.
                     if k <= self.oldkmt[j,i]:
-                            if self.im == 'nn' or self.im == 'nhn':
+                            if self.im == 'nn' or self.im == 'nhn' or self.im == 'mq':
 
                                 interp_info.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i],k,j,i])
 
@@ -172,7 +174,7 @@ class initialize_new_paleobath(GeographicSystem):
         self.obsolete = np.array(obsolete)
         self.bad2d = self.ns == 0
 
-        if self.im == 'nn' or self.im == 'nhn':
+        if self.im == 'nn' or self.im == 'nhn' or self.im == 'mq':
             self.interp_info = np.array(interp_info)
             self.tdi_interp_info = np.array(tdi_interp_info)
 
@@ -206,7 +208,7 @@ class initialize_new_paleobath(GeographicSystem):
         # Initialize new data dictionary to be written to the output netcdf file.
         newrst = dict()
 
-        for var in ['PSURF_CUR','TEMP_CUR']:#keys: # Commented part is for testing.
+        for var in keys:#['UVEL_CUR','VVEL_CUR','TEMP_CUR','SALT_CUR','IAGE_CUR']: # Commented part is for testing.
 
             print(var)
             olddata = f0.variables['%s'%var][:]
@@ -337,9 +339,57 @@ class initialize_new_paleobath(GeographicSystem):
                         xyz_cell = self.geodetic2geocentric(self.tlon[cell[1],cell[2]],self.tlat[cell[1],cell[2]],self.tdepth[cell[0]])
                         newdata[cell[0],cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
 
-        return newdata
+        # Multiquadric Interpolation (continuously differentiable)
+        # NOTE: The multiquadric interpolation may require tweaking of the Epsilon value (this is defined in the Rbf call)
+        # which essentially limits how far away values might influence the interpolated point. If this value is not set to
+        # a reasonable value for your dataset (play around with it, you'll find one that works), you may get weird
+        # interpolated values.
+        elif self.im == 'mq':
 
-        # other interpolation methods will be built-in later...
+            xyz_grid = dict()
+            defined_olddata = dict()
+
+            print('\n\nFinding data and converting from LLA to XYZ coordinate systems on grid level: ')
+
+            for klvl in range(self.ov.shape[0]):
+
+                print('k = %d'%klvl)
+
+                # Initialize the lists that will capture the data on each level.
+                gridlla_at_this_level = []
+                values_at_this_level = []
+
+                for k,j,i in self.interp_info[:,3:6]:
+
+                    if k == klvl:
+
+                        # Append any data and locations in LLA that are on this level and are defined in the old rst file.
+                        gridlla_at_this_level.append([self.tdepth[k],self.tlon[j,i],self.tlat[j,i]])
+                        values_at_this_level.append(olddata[k,j,i])
+
+                gridlla_at_this_level = np.array(gridlla_at_this_level)
+                gridlla_at_this_level = gridlla_at_this_level[::10,:] # EXPERIMENTAL every 100th point.
+
+                xyz_grid[klvl] = self.geodetic2geocentric(gridlla_at_this_level[:,1],gridlla_at_this_level[:,2],gridlla_at_this_level[:,0])
+                defined_olddata[klvl] = np.array(values_at_this_level)[::10] # EXPERIMENTAL SEE ABOVE
+
+            print('\n\nBuilding interpolation matrix and interpolating to new grid cells on grid level: ')
+
+            for klvl in range(self.ov.shape[0]):
+
+                print('k = %d'%klvl)
+
+                interpEngine = si.Rbf(xyz_grid[klvl][:,0],xyz_grid[klvl][:,1],xyz_grid[klvl][:,2],defined_olddata[klvl],function='multiquadric',epsilon=209000.0)
+                print(interpEngine.epsilon)
+
+                for cell in self.new:
+
+                    if cell[0] == klvl:
+
+                        xyz_cell = self.geodetic2geocentric(self.tlon[cell[1],cell[2]],self.tlat[cell[1],cell[2]],self.tdepth[cell[0]])
+                        newdata[cell[0],cell[1],cell[2]] = interpEngine(xyz_cell[0],xyz_cell[1],xyz_cell[2])
+
+        return newdata
 
     def geodetic2geocentric(self,llon,llat,ddepth):
         '''The latitude, longitude, and altitude of the gridded points are converted to earth-centered,
@@ -361,7 +411,6 @@ class initialize_new_paleobath(GeographicSystem):
             x,y,z = g.toECEF(llon,llat,ddepth)
 
             return np.array([x,y,z])
-
 
     def global_avg(self,tarea):
         '''Not implemented at this time; in the future this will likely be the global averege for each level'''
@@ -432,6 +481,14 @@ class initialize_new_paleobath(GeographicSystem):
 
         print('\n\nFinished! New restart file: %s \n\n'%outfilename)
 
+
+
+
+
+
+
+
+
 if __name__=='__main__':
 
     # Load restart file to modify.
@@ -458,5 +515,5 @@ if __name__=='__main__':
     tlat = f.variables['TLAT'][:]
     tlon = f.variables['TLONG'][:]
     depth = f.variables['z_t'][:]/100.0*-1
-    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth,twodeeint=True)
+    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth,twodeeint=False,interp_method='mq')
     zzz.create_new_rst('../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0851-01-01-00000.nc','../testout_rst.nc')
