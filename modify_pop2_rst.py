@@ -239,14 +239,16 @@ class initialize_new_paleobath(GeographicSystem):
 
                     # Create interpolation class instance for 2D variable:
                     print('...Creating nearest-neighbor interpolation matrix for %s...\n'%var)
-                    interpEngine = si.NearestNDInterpolator(self.tdi_xyz_grid,defined_olddata)
+                    #interpEngine = si.NearestNDInterpolator(self.tdi_xyz_grid,defined_olddata)
+                    interpEngine = si.Rbf(self.tdi_xyz_grid[:,0],self.tdi_xyz_grid[:,1],self.tdi_xyz_grid[:,2],defined_olddata)
 
                     # Identify the new surface cells.
                     for cell in self.new:
                         if cell[0] == 0:
 
                             xyz_cell = self.geodetic2geocentric(self.tlon[cell[1],cell[2]],self.tlat[cell[1],cell[2]],self.tdepth[cell[0]])
-                            newdata[cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
+                            #newdata[cell[1],cell[2]] = interpEngine.__call__(xyz_cell)
+                            newdata[cell[1],cell[2]] = interpEngine(xyz_cell[0],xyz_cell[1],xyz_cell[2])
 
                     # Edit the new land points to be 0.
                     newdata[self.bad2d] = self.emptyvalue
@@ -515,5 +517,5 @@ if __name__=='__main__':
     tlat = f.variables['TLAT'][:]
     tlon = f.variables['TLONG'][:]
     depth = f.variables['z_t'][:]/100.0*-1
-    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth,twodeeint=False,interp_method='mq')
+    zzz = initialize_new_paleobath(t,kmt,tlat,tlon,depth,twodeeint=True,interp_method='mq')
     zzz.create_new_rst('../MAA_B1850C4CN_f19_g16_cret_4x_sewall.pop.r.0851-01-01-00000.nc','../testout_rst.nc')
